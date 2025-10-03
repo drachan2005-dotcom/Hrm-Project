@@ -5,11 +5,14 @@ import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { supabase } from '../lib/supabase';
 import { HelpCircle } from 'lucide-react';
+import { TwoFactorPrompt } from '../components/auth/TwoFactorPrompt';
 
 interface LoginProps {
   onNavigate: (page: string) => void;
   onLoginSuccess: () => void;
 }
+
+type LoginStep = 'login' | '2fa';
 
 export function Login({ onNavigate, onLoginSuccess }: LoginProps) {
   // State để lưu email và password
@@ -17,26 +20,31 @@ export function Login({ onNavigate, onLoginSuccess }: LoginProps) {
   const [password, setPassword] = useState('');
 
   // State để quản lý bước đăng nhập (bình thường hoặc 2FA)
-  const [step, setStep] = useState<'login' | '2fa'>('login');
+  const [step, setStep] = useState<LoginStep>('login');
 
-  // State để lưu mã OTP 2FA
-  const [otpCode, setOtpCode] = useState(['', '', '', '']);
+  // State để lưu mã 2FA người dùng nhập và mã mock được tạo
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [generatedCode, setGeneratedCode] = useState('');
 
-  // State để hiển thị lỗi
+  // State để hiển thị lỗi và trạng thái loading
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // State lưu user ID tạm thời cho bước 2FA
-  const [tempUserId, setTempUserId] = useState('');
+  // Hàm đặt lại trạng thái 2FA khi người dùng hủy hoặc xác thực thành công
+  const resetTwoFactorState = () => {
+    setTwoFactorCode('');
+    setGeneratedCode('');
+    setStep('login');
+  };
 
   // Hàm xử lý đăng nhập
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      // Đăng nhập với Supabase
+      // Đăng nhập với Supabase bằng email và mật khẩu
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -44,76 +52,66 @@ export function Login({ onNavigate, onLoginSuccess }: LoginProps) {
 
       if (signInError) throw signInError;
 
-      // Kiểm tra xem user có bật 2FA không
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('two_fa_enabled')
-        .eq('id', data.user.id)
-        .maybeSingle();
+      const user = data.user;
+      if (!user) throw new Error('Không tìm thấy thông tin người dùng');
 
-      // Nếu có 2FA thì chuyển sang bước nhập OTP
-      if (profile?.two_fa_enabled) {
-        setTempUserId(data.user.id);
+      // Kiểm tra cờ 2FA trong metadata của user
+      const isTwoFactorEnabled = Boolean(user.user_metadata?.is2FAEnabled);
+
+      if (isTwoFactorEnabled) {
+        // Nếu bật 2FA: tạo mã mock 6 số và chuyển sang bước nhập mã
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        setGeneratedCode(code);
+        setTwoFactorCode('');
         setStep('2fa');
 
-        // Giả lập gửi OTP (trong thực tế sẽ gửi qua email/SMS)
-        // Ở đây để demo, OTP luôn là "1590"
-        console.log('OTP Code: 1590');
-      } else {
-        // Không có 2FA thì đăng nhập luôn
-        onLoginSuccess();
+        // Demo tạm thời: in mã ra console để QA có thể thử
+        console.log('Mã 2FA (demo):', code);
+        return;
       }
-    } catch (err: any) {
-      setError(err.message || 'Đăng nhập thất bại');
+
+      // Nếu chưa bật 2FA thì hoàn tất đăng nhập luôn
+      onLoginSuccess();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Đăng nhập thất bại';
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Hàm xử lý nhập OTP
-  const handleOtpChange = (index: number, value: string) => {
-    // Chỉ cho phép nhập số
-    if (value && !/^\d$/.test(value)) return;
-
-    const newOtp = [...otpCode];
-    newOtp[index] = value;
-    setOtpCode(newOtp);
-
-    // Tự động focus sang ô tiếp theo
-    if (value && index < 3) {
-      const nextInput = document.getElementById(`otp-${index + 1}`);
-      nextInput?.focus();
-    }
-  };
-
-  // Hàm xác thực OTP
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Hàm xác thực mã 2FA
+  const handleVerifyTwoFactor = async () => {
     setError('');
-    setLoading(true);
 
-    const otp = otpCode.join('');
-
-    // Kiểm tra OTP có đủ 4 số không
-    if (otp.length !== 4) {
-      setError('Vui lòng nhập đủ 4 số');
-      setLoading(false);
+    // Kiểm tra định dạng mã 2FA (phải đủ 6 chữ số)
+    if (!/^\d{6}$/.test(twoFactorCode)) {
+      setError('Vui lòng nhập đủ 6 số của mã 2FA');
       return;
     }
 
+    setLoading(true);
     try {
-      // Trong thực tế sẽ verify OTP với backend
-      // Ở đây demo đơn giản: OTP đúng là "1590"
-      if (otp === '1590') {
+      if (twoFactorCode === generatedCode) {
+        // Đúng mã thì cho phép điều hướng vào Dashboard
         onLoginSuccess();
+        resetTwoFactorState();
       } else {
-        throw new Error('Mã OTP không đúng');
+        throw new Error('Mã 2FA không chính xác');
       }
-    } catch (err: any) {
-      setError(err.message || 'Xác thực thất bại');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Xác thực 2FA thất bại';
+      setError(message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Hàm xử lý khi người dùng muốn quay lại bước đăng nhập
+  const handleCancelTwoFactor = async () => {
+    setError('');
+    resetTwoFactorState();
+    await supabase.auth.signOut();
   };
 
   return (
@@ -203,47 +201,17 @@ export function Login({ onNavigate, onLoginSuccess }: LoginProps) {
             </div>
           )}
 
-          {/* Form nhập OTP 2FA */}
+          {/* Form nhập mã 2FA */}
           {step === '2fa' && (
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Enter OTP</h1>
-              <p className="text-gray-600 mb-8">
-                Please enter your the verification code sent to your registered email ID
-              </p>
-
-              <form onSubmit={handleVerifyOtp} className="space-y-6">
-                {/* 4 ô nhập OTP */}
-                <div className="flex justify-center gap-4">
-                  {otpCode.map((digit, index) => (
-                    <input
-                      key={index}
-                      id={`otp-${index}`}
-                      type="text"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleOtpChange(index, e.target.value)}
-                      className="w-16 h-16 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  ))}
-                </div>
-
-                <p className="text-center text-sm text-gray-600">
-                  We have sent a verification code to your registered email ID
-                </p>
-
-                {error && (
-                  <div className="text-red-500 text-sm text-center">{error}</div>
-                )}
-
-                <Button type="submit" disabled={loading}>
-                  {loading ? 'Đang xác thực...' : 'Next'}
-                </Button>
-
-                <p className="text-center text-sm text-gray-600">
-                  Demo: Mã OTP là <span className="font-bold">1590</span>
-                </p>
-              </form>
-            </div>
+            <TwoFactorPrompt
+              code={twoFactorCode}
+              loading={loading}
+              error={error}
+              demoCode={generatedCode}
+              onCodeChange={setTwoFactorCode}
+              onSubmit={handleVerifyTwoFactor}
+              onCancel={handleCancelTwoFactor}
+            />
           )}
         </div>
       </div>
