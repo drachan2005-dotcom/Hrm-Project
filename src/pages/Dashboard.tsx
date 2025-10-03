@@ -1,9 +1,10 @@
 // Trang dashboard sau khi đăng nhập thành công
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Logo } from '../components/Logo';
 import { supabase } from '../lib/supabase';
 import { LogOut, User, Calendar, BarChart3, Settings } from 'lucide-react';
 import type { Profile } from '../types';
+import { Button } from '../components/Button';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -14,21 +15,31 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // State quản lý cấu hình 2FA từ metadata
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [updatingTwoFactor, setUpdatingTwoFactor] = useState(false);
+  const [twoFactorError, setTwoFactorError] = useState('');
+
   // Load profile khi component mount
   useEffect(() => {
     loadProfile();
-  }, []);
+  }, [loadProfile]);
 
   // Hàm load profile từ database
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
       // Lấy user hiện tại
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
       if (!user) {
         onLogout();
         return;
       }
+
+      // Lưu trạng thái 2FA từ metadata để hiển thị toggle
+      setTwoFactorEnabled(Boolean(user.user_metadata?.is2FAEnabled));
 
       // Load profile từ database
       const { data, error } = await supabase
@@ -44,6 +55,50 @@ export function Dashboard({ onLogout }: DashboardProps) {
       console.error('Error loading profile:', error);
     } finally {
       setLoading(false);
+    }
+  }, [onLogout]);
+
+  // Hàm cập nhật trạng thái 2FA thông qua Supabase Auth metadata
+  const handleToggleTwoFactor = async () => {
+    setTwoFactorError('');
+    setUpdatingTwoFactor(true);
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setUpdatingTwoFactor(false);
+        onLogout();
+        return;
+      }
+
+      const nextValue = !twoFactorEnabled;
+
+      // Cập nhật metadata của user trong Supabase Auth
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { is2FAEnabled: nextValue },
+      });
+
+      if (updateError) throw updateError;
+
+      // Đồng bộ thêm về bảng profiles để giao diện hiện tại không lệch dữ liệu
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ two_fa_enabled: nextValue })
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
+
+      setTwoFactorEnabled(nextValue);
+      setProfile((prev) => (prev ? { ...prev, two_fa_enabled: nextValue } : prev));
+    } catch (error) {
+      console.error('Error updating 2FA:', error);
+      const message = error instanceof Error ? error.message : 'Cập nhật 2FA thất bại, vui lòng thử lại';
+      setTwoFactorError(message);
+    } finally {
+      setUpdatingTwoFactor(false);
     }
   };
 
@@ -198,24 +253,41 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
               <div>
                 <p className="text-sm text-gray-500 mb-1">Trạng thái KYC</p>
-                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                  profile?.kyc_completed
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-yellow-100 text-yellow-700'
-                }`}>
+                <span
+                  className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                    profile?.kyc_completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                  }`}
+                >
                   {profile?.kyc_completed ? 'Đã hoàn thành' : 'Chưa hoàn thành'}
                 </span>
               </div>
 
               <div>
                 <p className="text-sm text-gray-500 mb-1">Xác thực 2 yếu tố (2FA)</p>
-                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                  profile?.two_fa_enabled
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-gray-100 text-gray-700'
-                }`}>
-                  {profile?.two_fa_enabled ? 'Đã bật' : 'Chưa bật'}
+                <span
+                  className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                    profile?.two_fa_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {twoFactorEnabled ? 'Đã bật' : 'Chưa bật'}
                 </span>
+
+                <div className="mt-3 space-y-2">
+                  <Button
+                    onClick={handleToggleTwoFactor}
+                    variant={twoFactorEnabled ? 'secondary' : 'primary'}
+                    fullWidth={false}
+                    disabled={updatingTwoFactor}
+                  >
+                    {updatingTwoFactor
+                      ? 'Đang cập nhật...'
+                      : twoFactorEnabled
+                      ? 'Tắt xác thực 2FA'
+                      : 'Bật xác thực 2FA'}
+                  </Button>
+
+                  {twoFactorError && <p className="text-sm text-red-500">{twoFactorError}</p>}
+                </div>
               </div>
             </div>
           </div>
