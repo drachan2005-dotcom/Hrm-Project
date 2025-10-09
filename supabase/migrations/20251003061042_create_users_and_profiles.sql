@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   kyc_completed boolean DEFAULT false,
   two_fa_enabled boolean DEFAULT false,
   two_fa_secret text,
+
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -79,3 +80,4 @@ CREATE TRIGGER update_profiles_updated_at
   BEFORE UPDATE ON profiles
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+

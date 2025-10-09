@@ -46,8 +46,9 @@ export function ForgotPassword({ onNavigate }: ForgotPasswordProps) {
       setTimeout(() => {
         setStep('reset');
       }, 2000);
-    } catch (err: any) {
-      setError(err.message || 'Không thể gửi email');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : null;
+      setError(message || 'Không thể gửi email');
     } finally {
       setLoading(false);
     }
@@ -87,8 +88,9 @@ export function ForgotPassword({ onNavigate }: ForgotPasswordProps) {
       setTimeout(() => {
         onNavigate('login');
       }, 2000);
-    } catch (err: any) {
-      setError(err.message || 'Không thể đổi mật khẩu');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : null;
+      setError(message || 'Không thể đổi mật khẩu');
     } finally {
       setLoading(false);
     }
@@ -220,3 +222,5 @@ export function ForgotPassword({ onNavigate }: ForgotPasswordProps) {
     </div>
   );
 }
+
+

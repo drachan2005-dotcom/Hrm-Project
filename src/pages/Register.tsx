@@ -119,30 +119,36 @@ export function Register({ onNavigate, onRegisterSuccess }: RegisterProps) {
 
       if (signUpError) throw signUpError;
 
-      if (!authData.user) throw new Error('Không thể tạo tài khoản');
+      const supabaseUser = authData.user;
+      if (!supabaseUser) throw new Error('Không thể tạo tài khoản');
 
-      // Bước 2: Tạo profile trong database
+      const defaultProfile = {
+        id: supabaseUser.id,
+        full_name: step1Data.fullName,
+        username: step4Data.username || step1Data.email.split('@')[0],
+        phone_number: step1Data.phoneNumber,
+        role_preference: step2Data.rolePreference,
+        department: step3Data.department,
+        position: step3Data.position,
+        description: step3Data.description,
+        kyc_completed: false,
+        two_fa_enabled: false,
+        two_fa_secret: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
       const { error: profileError } = await supabase
         .from('profiles')
-        .insert({
-          id: authData.user.id,
-          full_name: step1Data.fullName,
-          username: step4Data.username,
-          phone_number: step1Data.phoneNumber,
-          role_preference: step2Data.rolePreference,
-          department: step3Data.department,
-          position: step3Data.position,
-          description: step3Data.description,
-          kyc_completed: true,
-          two_fa_enabled: false,
-        });
-
+        .upsert(defaultProfile, { onConflict: 'id' });
       if (profileError) throw profileError;
 
       // Chuyển sang màn hình success
       setCurrentStep(5);
-    } catch (err: any) {
-      setError(err.message || 'Đăng ký thất bại');
+      onRegisterSuccess();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : null;
+      setError(message || 'Đăng ký thất bại');
     } finally {
       setLoading(false);
     }
@@ -548,3 +554,5 @@ export function Register({ onNavigate, onRegisterSuccess }: RegisterProps) {
     </div>
   );
 }
+
+

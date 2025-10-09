@@ -3,18 +3,17 @@
 // Kiểu dữ liệu cho thông tin profile người dùng
 export interface Profile {
   id: string;
-  full_name: string;
-  username: string;
-  phone_number?: string;
-  role_preference: 'employee' | 'manager';
+  full_name?: string;
+  username?: string;
+  phone?: string;
   department?: string;
   position?: string;
   description?: string;
-  kyc_completed: boolean;
   two_fa_enabled: boolean;
-  two_fa_secret?: string;
-  created_at: string;
-  updated_at: string;
+  two_fa_secret?: string | null;
+  kyc_completed: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Kiểu dữ liệu cho form đăng ký - Bước 1
@@ -42,3 +41,4 @@ export interface RegisterStep4Data {
   password: string;
   confirmPassword: string;
 }
+
