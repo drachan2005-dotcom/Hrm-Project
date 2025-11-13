@@ -1,5 +1,6 @@
 // Component input tái sử dụng cho các form
 import { Lock, Mail, Phone, User } from 'lucide-react';
+import type { FocusEventHandler } from 'react';
 
 interface InputProps {
   type: string;
@@ -9,6 +10,7 @@ interface InputProps {
   label?: string;
   required?: boolean;
   icon?: 'email' | 'password' | 'user' | 'phone';
+  onBlur?: FocusEventHandler<HTMLInputElement>;
 }
 
 export function Input({
@@ -18,7 +20,8 @@ export function Input({
   onChange,
   label,
   required = false,
-  icon
+  icon,
+  onBlur
 }: InputProps) {
 
   // Hàm chọn icon phù hợp
@@ -59,6 +62,7 @@ export function Input({
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
           className={`w-full ${icon ? 'pl-11' : 'pl-4'} pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition`}
           required={required}
         />

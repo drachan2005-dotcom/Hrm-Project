@@ -1,22 +1,35 @@
 ﻿// Trang Ä‘Äƒng nháº­p vá»›i 2FA thá»±c táº¿
 import { useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import * as OTPAuth from 'otpauth';
 import { Logo } from '../components/Logo';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { supabase } from '../lib/supabase';
+import { authenticateMockUser, type MockUser } from '../lib/mockAuth';
 import { HelpCircle } from 'lucide-react';
 import { TwoFactorPrompt } from '../components/auth/TwoFactorPrompt';
+import { isNetworkError } from '../utils/network';
+
+export interface LoginSuccessPayload {
+  mode: 'supabase' | 'mock';
+  session?: Session | null;
+  mockUser?: MockUser | null;
+}
 
 interface LoginProps {
   onNavigate: (page: 'login' | 'register' | 'forgot-password') => void;
-  onLoginSuccess: () => void;
+  onLoginSuccess: (payload: LoginSuccessPayload) => void;
   onRequire2FA: (value: boolean) => void;
+  authMode: 'supabase' | 'mock';
 }
 
 type LoginStep = 'login' | '2fa';
+const HAS_SUPABASE_ENV = Boolean(
+  import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
-export function Login({ onNavigate, onLoginSuccess, onRequire2FA }: LoginProps) {
+export function Login({ onNavigate, onLoginSuccess, onRequire2FA, authMode }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [step, setStep] = useState<LoginStep>('login');
@@ -25,6 +38,8 @@ export function Login({ onNavigate, onLoginSuccess, onRequire2FA }: LoginProps) 
   const [lastVerifiedStep, setLastVerifiedStep] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingSession, setPendingSession] = useState<Session | null>(null);
+  const shouldUseSupabase = HAS_SUPABASE_ENV && authMode === 'supabase';
 
   const resetTwoFactorState = () => {
     setTwoFactorCode('');
@@ -32,27 +47,61 @@ export function Login({ onNavigate, onLoginSuccess, onRequire2FA }: LoginProps) 
     setLastVerifiedStep(null);
     setStep('login');
     setError('');
+    setPendingSession(null);
   };
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
 
-    if (!email.trim() || !password) {
+    const trimmedIdentifier = email.trim();
+    if (!trimmedIdentifier || !password) {
       setError('Please enter your email and password');
       return;
     }
 
-    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-      setError('Supabase configuration missing (.env not set)');
+    if (!shouldUseSupabase) {
+      const mockUser = authenticateMockUser(trimmedIdentifier, password);
+      if (!mockUser) {
+        setError('Invalid email or password');
+        return;
+      }
+      onRequire2FA(false);
+      onLoginSuccess({ mode: 'mock', mockUser });
+      resetTwoFactorState();
       return;
     }
 
     setLoading(true);
 
     try {
+      let loginEmail = trimmedIdentifier;
+
+      if (!trimmedIdentifier.includes('@')) {
+        const {
+          data: usernameProfile,
+          error: usernameLookupError,
+        } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('username', trimmedIdentifier)
+          .maybeSingle();
+
+        if (usernameLookupError) {
+          throw usernameLookupError;
+        }
+
+        if (!usernameProfile?.email) {
+          setError('Username not found');
+          return;
+        }
+
+        loginEmail = usernameProfile.email;
+        setEmail(loginEmail);
+      }
+
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: loginEmail,
         password,
       });
 
@@ -87,23 +136,40 @@ export function Login({ onNavigate, onLoginSuccess, onRequire2FA }: LoginProps) 
         onRequire2FA(true);
         setTwoFactorSecret(profileData.two_fa_secret);
         setTwoFactorCode('');
+        setPendingSession(data.session ?? null);
         setStep('2fa');
         return;
       }
 
       onRequire2FA(false);
+      onLoginSuccess({ mode: 'supabase', session: data.session ?? null });
       resetTwoFactorState();
-      onLoginSuccess();
     } catch (err) {
-      await supabase.auth.signOut();
-      onRequire2FA(false);
-      const message = err instanceof Error ? err.message : 'Login failed';
-      setError(message);
+      try {
+        await supabase.auth.signOut();
+    } catch {
+      // ignore sign-out network failures
+    }
+    onRequire2FA(false);
+    setPendingSession(null);
+
+    if (isNetworkError(err)) {
+      const fallbackUser = authenticateMockUser(trimmedIdentifier, password);
+      if (fallbackUser) {
+        setError('');
+        onLoginSuccess({ mode: 'mock', mockUser: fallbackUser });
+        resetTwoFactorState();
+        return;
+      }
+        setError(shouldUseSupabase ? 'Unable to reach Supabase. Verify URL and anon key in .env' : 'Invalid email or password');
+      } else {
+        const message = err instanceof Error ? err.message : 'Login failed';
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
   };
-
   const handleVerifyTwoFactor = async () => {
     setError('');
 
@@ -158,7 +224,7 @@ export function Login({ onNavigate, onLoginSuccess, onRequire2FA }: LoginProps) 
       }
 
       onRequire2FA(false);
-      onLoginSuccess();
+      onLoginSuccess({ mode: 'supabase', session: pendingSession ?? null });
       resetTwoFactorState();
     } catch (err) {
       const message = err instanceof Error ? err.message : '2FA verification failed';
@@ -210,8 +276,8 @@ export function Login({ onNavigate, onLoginSuccess, onRequire2FA }: LoginProps) 
 
               <form onSubmit={handleLogin} className="space-y-4">
                 <Input
-                  type="email"
-                  placeholder="ronaldrichards@pagedone.com"
+                  type="text"
+                  placeholder="username hoặc email"
                   value={email}
                   onChange={setEmail}
                   label="Email or Username"
